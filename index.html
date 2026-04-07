@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Трекер действий</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f7;color:#1a1a1a;font-size:14px;padding:12px}
+h2{font-size:16px;font-weight:600;margin-bottom:12px;color:#1a1a1a}
+.tabs{display:flex;gap:8px;margin-bottom:16px}
+.tab{flex:1;padding:8px;border:1px solid #ddd;border-radius:10px;background:#fff;font-size:13px;cursor:pointer;color:#555;text-align:center}
+.tab.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+.week-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.week-nav span{font-size:13px;font-weight:500;color:#333}
+.nav-btn{border:1px solid #ddd;border-radius:8px;background:#fff;padding:6px 12px;font-size:13px;cursor:pointer;color:#333}
+.today-btn{border:1px solid #ddd;border-radius:8px;background:#fff;padding:4px 10px;font-size:12px;cursor:pointer;color:#666}
+.stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+.stat-card{background:#fff;border-radius:10px;padding:10px 12px}
+.stat-card .lbl{font-size:11px;color:#888;margin-bottom:3px}
+.stat-card .val{font-size:20px;font-weight:600;color:#1a1a1a}
+.day-card{background:#fff;border-radius:12px;padding:12px 14px;margin-bottom:8px;border:1px solid #eee}
+.day-card.today{border-color:#1a1a1a}
+.day-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.day-title{display:flex;align-items:center;gap:6px}
+.day-name{font-size:13px;font-weight:600;color:#333}
+.day-date{font-size:12px;color:#999}
+.badge-today{font-size:10px;background:#e8f0fe;color:#1a56db;border-radius:6px;padding:2px 7px}
+.day-result{font-size:12px;font-weight:500}
+.day-result.ok{color:#16a34a}
+.day-result.fail{color:#dc2626}
+.day-result.empty{color:#bbb}
+.day-fields{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.field{background:#f9f9f9;border-radius:8px;padding:8px 10px}
+.field-lbl{font-size:11px;color:#888;margin-bottom:4px}
+.field-lbl.warn{color:#dc2626}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;cursor:pointer}
+.toggle{width:34px;height:19px;border-radius:10px;background:#ddd;position:relative;transition:background .15s;flex-shrink:0}
+.toggle.on{background:#16a34a}
+.toggle-knob{position:absolute;top:2.5px;width:14px;height:14px;border-radius:7px;background:#fff;transition:left .15s}
+.toggle.on .toggle-knob{left:17px}
+.toggle.off .toggle-knob{left:2.5px}
+.toggle-val{font-size:14px;font-weight:600;color:#1a1a1a}
+.num-input{width:100%;border:none;background:transparent;font-size:16px;font-weight:600;color:#1a1a1a;outline:none;padding:0}
+.alert{background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:10px 14px;margin-bottom:14px;color:#dc2626;font-size:13px;font-weight:500}
+.month-totals{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+.week-row{background:#fff;border-radius:12px;padding:12px 14px;margin-bottom:8px}
+.week-row-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.week-row-title{font-size:13px;font-weight:500;color:#333}
+.week-row-days{font-size:12px;font-weight:600}
+.progress-bar{height:6px;background:#f0f0f0;border-radius:3px;overflow:hidden;margin-bottom:8px}
+.progress-fill{height:100%;border-radius:3px;background:#ddd;transition:width .3s}
+.progress-fill.good{background:#16a34a}
+.week-row-meta{display:flex;gap:14px;font-size:12px;color:#888}
+.week-row-meta b{color:#333}
+.empty-state{color:#aaa;font-size:13px;padding:1rem 0}
+</style>
+</head>
+<body>
+
+<div class="tabs">
+  <div class="tab active" id="tab-week" onclick="switchView('week')">Неделя</div>
+  <div class="tab" id="tab-month" onclick="switchView('month')">Месяц</div>
+</div>
+
+<div id="view-week"></div>
+<div id="view-month" style="display:none"></div>
+
+<script>
+const MONTHS = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+const MONTHS_FULL = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+const DAYS = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+const KEY = 'tracker_v2';
+
+let currentMonday = getMonday(new Date());
+let currentView = 'week';
+
+function getMonday(d) {
+  const r = new Date(d);
+  const day = r.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  r.setDate(r.getDate() + diff);
+  r.setHours(0,0,0,0);
+  return r;
+}
+
+function dayKey(d) { return d.toISOString().slice(0,10); }
+
+function weekDays(monday) {
+  return Array.from({length:7},(_,i)=>{ const d=new Date(monday); d.setDate(d.getDate()+i); return d; });
+}
+
+function fmtDate(d) { return d.getDate()+' '+MONTHS[d.getMonth()]; }
+
+function loadAll() {
+  try { return JSON.parse(localStorage.getItem(KEY)||'{}'); } catch { return {}; }
+}
+
+function saveAll(data) {
+  localStorage.setItem(KEY, JSON.stringify(data));
+}
+
+function getEntry(dk) {
+  const all = loadAll();
+  return Object.assign({post:false,stories:false,dialogs:'',requests:''}, all[dk]||{});
+}
+
+function setField(dk, field, val) {
+  const all = loadAll();
+  all[dk] = Object.assign({post:false,stories:false,dialogs:'',requests:''}, all[dk]||{}, {[field]:val});
+  saveAll(all);
+  render();
+}
+
+function isCounted(e) {
+  return (e.post||e.stories) && (parseInt(e.dialogs)||0) >= 3;
+}
+
+function hasData(e) {
+  return e.post || e.stories || e.dialogs || e.requests;
+}
+
+function checkTrigger() {
+  const all = loadAll();
+  const keys = Object.keys(all).sort();
+  let streak = 0;
+  for (const k of keys) {
+    const e = all[k];
+    if (hasData(e) && (parseInt(e.dialogs)||0) < 3) {
+      streak++;
+      if (streak >= 2) return true;
+    } else { streak = 0; }
+  }
+  return false;
+}
+
+function switchView(v) {
+  currentView = v;
+  document.getElementById('tab-week').className = 'tab'+(v==='week'?' active':'');
+  document.getElementById('tab-month').className = 'tab'+(v==='month'?' active':'');
+  document.getElementById('view-week').style.display = v==='week'?'':'none';
+  document.getElementById('view-month').style.display = v==='month'?'':'none';
+  render();
+}
+
+function render() {
+  if (currentView === 'week') renderWeek();
+  else renderMonth();
+}
+
+function renderWeek() {
+  const days = weekDays(currentMonday);
+  const todayKey = dayKey(new Date());
+  const all = loadAll();
+  const trigger = checkTrigger();
+
+  let html = '';
+
+  if (trigger) {
+    html += `<div class="alert">⚠ 2 дня подряд менее 3 диалогов — напиши 10 исходящих сегодня!</div>`;
+  }
+
+  html += `<div class="week-nav">
+    <button class="nav-btn" onclick="prevWeek()">← Назад</button>
+    <span>${fmtDate(days[0])} — ${fmtDate(days[6])}</span>
+    <button class="nav-btn" onclick="nextWeek()">Вперёд →</button>
+  </div>
+  <div style="text-align:center;margin-bottom:12px">
+    <button class="today-btn" onclick="goToday()">Сегодня</button>
+  </div>`;
+
+  // Stats
+  const entries = days.map(d => getEntry(dayKey(d)));
+  const counted = entries.filter(isCounted).length;
+  const totalD = entries.reduce((s,e)=>s+(parseInt(e.dialogs)||0),0);
+  const totalR = entries.reduce((s,e)=>s+(parseInt(e.requests)||0),0);
+  html += `<div class="stats-grid">
+    <div class="stat-card"><div class="lbl">Дней засчитано</div><div class="val">${counted}/7</div></div>
+    <div class="stat-card"><div class="lbl">Диалогов</div><div class="val">${totalD}</div></div>
+    <div class="stat-card"><div class="lbl">Заявок</div><div class="val">${totalR}</div></div>
+  </div>`;
+
+  // Day cards
+  days.forEach((d,i) => {
+    const dk = dayKey(d);
+    const e = getEntry(dk);
+    const isToday = dk === todayKey;
+    const hd = hasData(e);
+    const cnt = isCounted(e);
+    const dialogs = parseInt(e.dialogs)||0;
+    const warn = hd && dialogs < 3;
+
+    let resultHtml = `<span class="day-result empty">—</span>`;
+    if (hd) {
+      resultHtml = cnt
+        ? `<span class="day-result ok">✔ Засчитан</span>`
+        : `<span class="day-result fail">✖ Не засчитан</span>`;
+    }
+
+    html += `<div class="day-card${isToday?' today':''}">
+      <div class="day-header">
+        <div class="day-title">
+          <span class="day-name">${DAYS[i]}</span>
+          <span class="day-date">${fmtDate(d)}</span>
+          ${isToday?'<span class="badge-today">сегодня</span>':''}
+        </div>
+        ${resultHtml}
+      </div>
+      <div class="day-fields">
+        <div class="field">
+          <div class="field-lbl">Пост</div>
+          <div class="toggle-row" onclick="toggle('${dk}','post',${e.post})">
+            <span class="toggle-val">${e.post?'✔':'✖'}</span>
+            <div class="toggle ${e.post?'on':'off'}"><div class="toggle-knob"></div></div>
+          </div>
+        </div>
+        <div class="field">
+          <div class="field-lbl">Сторис</div>
+          <div class="toggle-row" onclick="toggle('${dk}','stories',${e.stories})">
+            <span class="toggle-val">${e.stories?'✔':'✖'}</span>
+            <div class="toggle ${e.stories?'on':'off'}"><div class="toggle-knob"></div></div>
+          </div>
+        </div>
+        <div class="field">
+          <div class="field-lbl${warn?' warn':''}">${warn?'Диалоги (нужно 3+)':'Диалоги'}</div>
+          <input class="num-input" type="number" min="0" placeholder="0" value="${e.dialogs}"
+            onchange="setField('${dk}','dialogs',this.value)"
+            oninput="setField('${dk}','dialogs',this.value)"/>
+        </div>
+        <div class="field">
+          <div class="field-lbl">Заявки</div>
+          <input class="num-input" type="number" min="0" placeholder="0" value="${e.requests}"
+            onchange="setField('${dk}','requests',this.value)"
+            oninput="setField('${dk}','requests',this.value)"/>
+        </div>
+      </div>
+    </div>`;
+  });
+
+  document.getElementById('view-week').innerHTML = html;
+}
+
+function renderMonth() {
+  const all = loadAll();
+  const weeks = {};
+  Object.keys(all).sort().forEach(dk => {
+    const d = new Date(dk);
+    const m = getMonday(d);
+    const mk = dayKey(m);
+    if (!weeks[mk]) weeks[mk] = {monday:m, days:[]};
+    weeks[mk].days.push({dk, e: all[dk]});
+  });
+
+  const rows = Object.values(weeks).sort((a,b)=>a.monday-b.monday);
+
+  if (!rows.length) {
+    document.getElementById('view-month').innerHTML = `<div class="empty-state">Данных пока нет. Заполни хотя бы одну неделю.</div>`;
+    return;
+  }
+
+  const totCnt = rows.reduce((s,w)=>s+w.days.filter(d=>isCounted(d.e)).length,0);
+  const totDays = rows.reduce((s,w)=>s+w.days.length,0);
+  const totD = rows.reduce((s,w)=>s+w.days.reduce((ss,d)=>ss+(parseInt(d.e.dialogs)||0),0),0);
+  const totR = rows.reduce((s,w)=>s+w.days.reduce((ss,d)=>ss+(parseInt(d.e.requests)||0),0),0);
+
+  let html = `<div class="month-totals">
+    <div class="stat-card"><div class="lbl">Дней засчитано</div><div class="val">${totCnt}/${totDays}</div></div>
+    <div class="stat-card"><div class="lbl">Диалогов</div><div class="val">${totD}</div></div>
+    <div class="stat-card"><div class="lbl">Заявок</div><div class="val">${totR}</div></div>
+  </div>`;
+
+  rows.forEach(w => {
+    const cnt = w.days.filter(d=>isCounted(d.e)).length;
+    const tot = w.days.length;
+    const pct = tot ? Math.round(cnt/tot*100) : 0;
+    const tD = w.days.reduce((s,d)=>s+(parseInt(d.e.dialogs)||0),0);
+    const tR = w.days.reduce((s,d)=>s+(parseInt(d.e.requests)||0),0);
+    const end = new Date(w.monday); end.setDate(end.getDate()+6);
+    html += `<div class="week-row">
+      <div class="week-row-head">
+        <span class="week-row-title">${fmtDate(w.monday)} — ${fmtDate(end)}</span>
+        <span class="week-row-days" style="color:${pct>=70?'#16a34a':'#888'}">${cnt}/${tot} дн.</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill${pct>=70?' good':''}" style="width:${pct}%"></div></div>
+      <div class="week-row-meta">
+        <span>Диалоги: <b>${tD}</b></span>
+        <span>Заявки: <b>${tR}</b></span>
+      </div>
+    </div>`;
+  });
+
+  document.getElementById('view-month').innerHTML = html;
+}
+
+function toggle(dk, field, current) {
+  setField(dk, field, !current);
+}
+
+function prevWeek() { currentMonday.setDate(currentMonday.getDate()-7); render(); }
+function nextWeek() { currentMonday.setDate(currentMonday.getDate()+7); render(); }
+function goToday() { currentMonday = getMonday(new Date()); render(); }
+
+render();
+</script>
+</body>
+</html>
